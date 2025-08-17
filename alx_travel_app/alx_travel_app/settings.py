@@ -138,3 +138,7 @@ SWAGGER_SETTINGS = {
 }
 
 CHAPA_SECRET_KEY = env("CHAPA_SECRET_KEY")
+
+# Email config
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'  # for dev/testing
+DEFAULT_FROM_EMAIL = 'no-reply@yourdomain.com'
