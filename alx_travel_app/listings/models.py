@@ -82,7 +82,7 @@ class Payment(models.Model):
         FAILED = "failed", "Failed"
         REFUNDED = "refunded", "Refunded"
 
-    payment_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, db_index=True)
+    transaction_id = models.CharField(max_length=100, unique=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='payments')
     booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name="payments")
     payment_status = models.CharField(
