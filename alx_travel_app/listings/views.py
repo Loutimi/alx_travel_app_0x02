@@ -1,16 +1,13 @@
 import requests
-import json
 import uuid
-from django.shortcuts import render
 from rest_framework import viewsets, status
 from .models import Listing, Booking, Review, Payment
 from .serializers import ListingSerializer, BookingSerializer, ReviewSerializer, PaymentSerializer
-from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.exceptions import PermissionDenied
 from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
-
+from .tasks import send_payment_email, send_confirmation_email
 
 
 class ListingViewSet(viewsets.ModelViewSet):
@@ -59,7 +56,7 @@ class InitiatePaymentView(APIView):
         except Booking.DoesNotExist:
             return Response({"error": "Booking not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        tx_ref = str(uuid.uuid4())  # unique transaction reference
+        tx_ref = str(uuid.uuid4())
         amount = booking.total_price
 
         payload = {
@@ -89,56 +86,50 @@ class InitiatePaymentView(APIView):
         if response.status_code != 200 or data.get("status") != "success":
             return Response({"error": data}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Save payment record
+        # Save payment record with checkout_url
         payment = Payment.objects.create(
             booking=booking,
             user=request.user,
             transaction_id=tx_ref,
             amount=amount,
-            status=Payment.Status.PENDING
+            status=Payment.Status.PENDING,
+            checkout_url=data["data"]["checkout_url"] 
         )
 
+        # Send reminder email via Celery
+        send_payment_email.delay(request.user.email, payment.checkout_url)
+
         return Response({
-            "checkout_url": data["data"]["checkout_url"],
+            "checkout_url": payment.checkout_url,
             "transaction_id": tx_ref
         }, status=status.HTTP_201_CREATED)
 
+
 class VerifyPaymentView(APIView):
     def get(self, request, tx_ref):
-        """
-        Callback handler for Chapa.
-        Always verify the transaction before updating status.
-        """
-        headers = {
-            "Authorization": f"Bearer {settings.CHAPA_SECRET_KEY}",
-            "Content-Type": "application/json"
-        }
-
-        # Verify transaction with Chapa
-        response = requests.get(f"{settings.CHAPA_BASE_URL}/transaction/verify/{tx_ref}",
-                                headers=headers)
-        data = response.json()
-
         try:
             payment = Payment.objects.get(transaction_id=tx_ref)
         except Payment.DoesNotExist:
             return Response({"error": "Payment not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Update status based on verified response
-        chapa_status = data.get("data", {}).get("status", "").lower()
-        if chapa_status == "success":
-            payment.status = Payment.Status.COMPLETED
-        elif chapa_status in ["failed", "cancelled"]:
-            payment.status = Payment.Status.FAILED
-        else:
-            payment.status = Payment.Status.PENDING
+        response = requests.get(
+            f"https://api.chapa.co/v1/transaction/verify/{tx_ref}",
+            headers={"Authorization": f"Bearer {settings.CHAPA_SECRET_KEY}"}
+        )
+        data = response.json()
 
+        if data["status"] == "success" and data["data"]["status"] == "success":
+            payment.status = "Completed"
+            payment.save()
+
+            # Send confirmation email asynchronously
+            send_confirmation_email.delay(payment.user.email, payment.amount)
+
+            return Response({"message": "Payment successful and confirmed."}, status=status.HTTP_200_OK)
+
+        payment.status = "Failed"
         payment.save()
-
-        return Response({
-            "transaction_id": payment.transaction_id,
-            "status": payment.status
-        }, status=status.HTTP_200_OK)
+        return Response({"message": "Payment verification failed."}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class PaymentSuccessView(APIView):
