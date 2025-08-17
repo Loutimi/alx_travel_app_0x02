@@ -77,22 +77,16 @@ class Review(models.Model):
 
 class Payment(models.Model):
     class Status(models.TextChoices):
-        PENDING = "pending", "Pending"
-        COMPLETED = "completed", "Completed"
-        FAILED = "failed", "Failed"
-        REFUNDED = "refunded", "Refunded"
+        PENDING = "Pending"
+        COMPLETED = "Completed"
+        FAILED = "Failed"
+        REFUNDED = "Refunded"
 
-    transaction_id = models.CharField(max_length=100, unique=True)
+    payment_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='payments')
-    booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name="payments")
-    payment_status = models.CharField(
-        max_length=20,
-        choices=Status.choices,
-        default=Status.PENDING
-    )
+    booking = models.ForeignKey('Booking', on_delete=models.CASCADE, related_name="payments")
+    transaction_id = models.CharField(max_length=100, unique=True)  # tx_ref
     amount = models.DecimalField(max_digits=10, decimal_places=2)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"{self.user} paid {self.amount} for {self.booking}"
