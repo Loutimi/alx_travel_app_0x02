@@ -15,6 +15,13 @@ class Listing(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at =models.DateTimeField(auto_now=True)
 
+    @property
+    def average_rating(self):
+        reviews = self.reviews.all()
+        if reviews.exists():
+            return round(sum([r.rating for r in reviews]) / reviews.count(), 1)
+        return None
+
     def __str__(self):
         return f"Listing: {self.name}"
 
@@ -59,13 +66,6 @@ class Review(models.Model):
     comment = models.TextField(null=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    @property
-    def average_rating(self):
-        reviews = self.reviews.all()
-        if reviews.exists():
-            return round(sum([r.rating for r in reviews]) / reviews.count(), 1)
-        return None
-
 
     class Meta:
         unique_together = ('listing', 'user')  # Prevents duplicate reviews for same listing by same user
@@ -73,3 +73,26 @@ class Review(models.Model):
 
     def __str__(self):
         return f"Rating: {self.rating} by User:{self.user}"
+
+
+class Payment(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+        REFUNDED = "refunded", "Refunded"
+
+    payment_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, db_index=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='payments')
+    booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name="payments")
+    payment_status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING
+    )
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user} paid {self.amount} for {self.booking}"
